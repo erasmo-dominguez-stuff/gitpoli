@@ -1,0 +1,40 @@
+name: Policy Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "policies/**"
+      - "schemas/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "policies/**"
+      - "schemas/**"
+
+jobs:
+  check:
+    name: Lint & Test Policies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+
+      - name: Check Rego syntax
+        run: opa check policies/
+
+      - name: Check Rego formatting
+        run: opa fmt --fail policies/
+
+      - name: Validate JSON schemas
+        run: ./scripts/validate_schema.sh
+
+      - name: Run Rego tests
+        run: opa test policies/ --ignore "*.json" -v

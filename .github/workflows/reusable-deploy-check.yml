@@ -1,0 +1,148 @@
+name: Reusable Deploy Policy Check
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target deployment environment (e.g. production, staging)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref being deployed (e.g. refs/heads/main)"
+        required: true
+        type: string
+      repo_policy_b64:
+        description: "Base64-encoded repo policy YAML (.repol/deploy.yaml contents)"
+        required: false
+        type: string
+        default: ""
+      approvers:
+        description: "Comma-separated list of approver logins"
+        required: false
+        type: string
+        default: ""
+      tests_passed:
+        description: "Whether CI tests passed"
+        required: false
+        type: boolean
+        default: false
+      signed_off:
+        description: "Whether DCO sign-off is present"
+        required: false
+        type: boolean
+        default: false
+      deployments_today:
+        description: "Number of deployments already done today"
+        required: false
+        type: number
+        default: 0
+      input-file:
+        description: "Path to a pre-built OPA input JSON file (alternative to individual inputs)"
+        required: false
+        type: string
+        default: ""
+      fail-on-deny:
+        description: "Fail the workflow when policy denies the deployment"
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      allow:
+        description: "Whether deployment is allowed (true/false)"
+        value: ${{ jobs.deploy-check.outputs.allow }}
+      violations:
+        description: "JSON array of violations (empty when allow=true)"
+        value: ${{ jobs.deploy-check.outputs.violations }}
+
+jobs:
+  deploy-check:
+    name: Evaluate Deploy Policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      allow: ${{ steps.policy.outputs.allow }}
+      violations: ${{ steps.policy.outputs.violations }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        if: inputs.input-file == ''
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Build OPA input
+        id: build-input
+        if: inputs.input-file == ''
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          REF: ${{ inputs.ref }}
+          REPO_POLICY_B64: ${{ inputs.repo_policy_b64 }}
+          APPROVERS: ${{ inputs.approvers }}
+          TESTS_PASSED: ${{ inputs.tests_passed }}
+          SIGNED_OFF: ${{ inputs.signed_off }}
+          DEPLOYMENTS_TODAY: ${{ inputs.deployments_today }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${REPO_POLICY_B64}" ]; then
+            POLICY=$(echo "${REPO_POLICY_B64}" | base64 -d | yq -o json)
+          elif [ -f ".repol/deploy.yaml" ]; then
+            POLICY=$(yq -o json '.repol/deploy.yaml')
+          else
+            echo "::error::No policy found — provide repo_policy_b64 or .repol/deploy.yaml"
+            exit 1
+          fi
+
+          ENV_NAMES=$(echo "$POLICY" | jq -r '[.policy.environments | keys[]] // []')
+
+          # Parse approvers CSV into JSON array
+          APPROVERS_JSON="[]"
+          if [ -n "${APPROVERS}" ]; then
+            APPROVERS_JSON=$(echo "${APPROVERS}" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))')
+          fi
+
+          jq -n \
+            --argjson policy "$POLICY" \
+            --argjson env_names "$ENV_NAMES" \
+            --argjson approvers "$APPROVERS_JSON" \
+            --argjson tests_passed "${TESTS_PASSED}" \
+            --argjson signed_off "${SIGNED_OFF}" \
+            --argjson deployments_today "${DEPLOYMENTS_TODAY}" \
+            --arg env "$ENVIRONMENT" \
+            --arg ref "$REF" \
+            '{
+              environment: $env,
+              ref: $ref,
+              repo_environments: $env_names,
+              workflow_meta: {
+                approvers: $approvers,
+                checks: { tests: $tests_passed },
+                signed_off: $signed_off,
+                deployments_today: $deployments_today
+              },
+              repo_policy: $policy
+            }' > /tmp/deploy-input.json
+
+          echo "input-path=/tmp/deploy-input.json" >> "$GITHUB_OUTPUT"
+
+      - name: Set input path
+        id: resolve-input
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.input-file }}" ]; then
+            echo "input-path=${{ inputs.input-file }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "input-path=${{ steps.build-input.outputs.input-path }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Evaluate deploy policy
+        id: policy
+        uses: ./.github/actions/eval-policy
+        with:
+          package: github.deploy
+          input-file: ${{ steps.resolve-input.outputs.input-path }}
+          fail-on-deny: ${{ inputs.fail-on-deny }}

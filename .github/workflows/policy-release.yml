@@ -1,0 +1,53 @@
+name: Policy Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Bundle version tag (e.g. v1.2.3)"
+        required: true
+
+jobs:
+  build-bundle:
+    name: Build OPA Bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+
+      - name: Check Rego syntax
+        run: opa check policies/
+
+      - name: Run tests before bundling
+        run: opa test policies/ --ignore "*.json"
+
+      - name: Build OPA bundle
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          opa build \
+            --bundle policies/ \
+            --output "governant-policies-${VERSION}.tar.gz"
+          echo "Built governant-policies-${VERSION}.tar.gz"
+          ls -lh governant-policies-*.tar.gz
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: governant-policies-bundle
+          path: governant-policies-*.tar.gz
+          retention-days: 90
+
+      - name: Upload bundle to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: governant-policies-*.tar.gz

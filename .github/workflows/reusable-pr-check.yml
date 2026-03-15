@@ -1,0 +1,128 @@
+name: Reusable PR Policy Check
+
+on:
+  workflow_call:
+    inputs:
+      head-ref:
+        description: "Head (source) branch name (e.g. feature/my-feature)"
+        required: true
+        type: string
+      base-ref:
+        description: "Base (target) branch name (e.g. main)"
+        required: true
+        type: string
+      repo_policy_b64:
+        description: "Base64-encoded repo policy YAML (.repol/pullrequest.yaml contents)"
+        required: false
+        type: string
+        default: ""
+      approvers:
+        description: "Comma-separated list of approver logins"
+        required: false
+        type: string
+        default: ""
+      signed_off:
+        description: "Whether DCO sign-off is present"
+        required: false
+        type: boolean
+        default: false
+      input-file:
+        description: "Path to a pre-built OPA input JSON file (alternative to individual inputs)"
+        required: false
+        type: string
+        default: ""
+      fail-on-deny:
+        description: "Fail the workflow when policy denies the PR"
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      allow:
+        description: "Whether the PR passes policy (true/false)"
+        value: ${{ jobs.pr-check.outputs.allow }}
+      violations:
+        description: "JSON array of violations (empty when allow=true)"
+        value: ${{ jobs.pr-check.outputs.violations }}
+
+jobs:
+  pr-check:
+    name: Evaluate PR Policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      allow: ${{ steps.policy.outputs.allow }}
+      violations: ${{ steps.policy.outputs.violations }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        if: inputs.input-file == ''
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Build OPA input
+        id: build-input
+        if: inputs.input-file == ''
+        shell: bash
+        env:
+          HEAD_REF: ${{ inputs.head-ref }}
+          BASE_REF: ${{ inputs.base-ref }}
+          REPO_POLICY_B64: ${{ inputs.repo_policy_b64 }}
+          APPROVERS: ${{ inputs.approvers }}
+          SIGNED_OFF: ${{ inputs.signed_off }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${REPO_POLICY_B64}" ]; then
+            POLICY=$(echo "${REPO_POLICY_B64}" | base64 -d | yq -o json)
+          elif [ -f ".repol/pullrequest.yaml" ]; then
+            POLICY=$(yq -o json '.repol/pullrequest.yaml')
+          else
+            echo "::error::No policy found — provide repo_policy_b64 or .repol/pullrequest.yaml"
+            exit 1
+          fi
+
+          APPROVERS_JSON="[]"
+          if [ -n "${APPROVERS}" ]; then
+            APPROVERS_JSON=$(echo "${APPROVERS}" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))')
+          fi
+
+          jq -n \
+            --argjson policy "$POLICY" \
+            --argjson approvers "$APPROVERS_JSON" \
+            --argjson signed_off "${SIGNED_OFF}" \
+            --arg head_ref "$HEAD_REF" \
+            --arg base_ref "$BASE_REF" \
+            '{
+              head_ref: $head_ref,
+              base_ref: $base_ref,
+              workflow_meta: {
+                approvers: $approvers,
+                signed_off: $signed_off
+              },
+              repo_policy: $policy
+            }' > /tmp/pr-input.json
+
+          echo "input-path=/tmp/pr-input.json" >> "$GITHUB_OUTPUT"
+
+      - name: Set input path
+        id: resolve-input
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.input-file }}" ]; then
+            echo "input-path=${{ inputs.input-file }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "input-path=${{ steps.build-input.outputs.input-path }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Evaluate PR policy
+        id: policy
+        uses: ./.github/actions/eval-policy
+        with:
+          package: github.pullrequest
+          input-file: ${{ steps.resolve-input.outputs.input-path }}
+          fail-on-deny: ${{ inputs.fail-on-deny }}

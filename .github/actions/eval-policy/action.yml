@@ -1,0 +1,96 @@
+name: Evaluate Policy
+description: |
+  Evaluate an OPA policy against an input file and report results.
+  Writes a step summary showing allow/deny status and any violations.
+
+inputs:
+  package:
+    description: "OPA package path to evaluate (e.g. github.deploy)"
+    required: true
+  input-file:
+    description: "Path to the JSON input file"
+    required: true
+  policies-dir:
+    description: "Path to the policies directory"
+    required: false
+    default: "policies"
+  fail-on-deny:
+    description: "Fail the action step when allow=false"
+    required: false
+    default: "true"
+
+outputs:
+  allow:
+    description: "Whether the policy allows the action (true/false)"
+    value: ${{ steps.eval.outputs.allow }}
+  violations:
+    description: "JSON array of violation objects"
+    value: ${{ steps.eval.outputs.violations }}
+
+runs:
+  using: composite
+  steps:
+  - name: Setup OPA
+    uses: open-policy-agent/setup-opa@v2
+    with:
+      version: latest
+
+  - name: Evaluate policy
+    id: eval
+    shell: bash
+    env:
+      OPA_PACKAGE: ${{ inputs.package }}
+      INPUT_FILE: ${{ inputs.input-file }}
+      POLICIES_DIR: ${{ inputs.policies-dir }}
+    run: |
+      set -euo pipefail
+
+      ALLOW=$(opa eval \
+        --data "${POLICIES_DIR}/" \
+        --input "${INPUT_FILE}" \
+        --format raw \
+        "data.${OPA_PACKAGE}.allow" || echo "false")
+
+      VIOLATIONS=$(opa eval \
+        --data "${POLICIES_DIR}/" \
+        --input "${INPUT_FILE}" \
+        --format pretty \
+        "data.${OPA_PACKAGE}.violations" 2>/dev/null || echo "[]")
+
+      echo "allow=${ALLOW}" >> "$GITHUB_OUTPUT"
+      echo "violations<<EOF" >> "$GITHUB_OUTPUT"
+      echo "${VIOLATIONS}" >> "$GITHUB_OUTPUT"
+      echo "EOF" >> "$GITHUB_OUTPUT"
+
+  - name: Write step summary
+    shell: bash
+    env:
+      OPA_PACKAGE: ${{ inputs.package }}
+      INPUT_FILE: ${{ inputs.input-file }}
+      ALLOW: ${{ steps.eval.outputs.allow }}
+      VIOLATIONS: ${{ steps.eval.outputs.violations }}
+    run: |
+      echo "## Policy Evaluation" >> "$GITHUB_STEP_SUMMARY"
+      echo "" >> "$GITHUB_STEP_SUMMARY"
+      echo "| Field       | Value |" >> "$GITHUB_STEP_SUMMARY"
+      echo "| ----------- | ----- |" >> "$GITHUB_STEP_SUMMARY"
+      echo "| **Package** | \`${OPA_PACKAGE}\` |" >> "$GITHUB_STEP_SUMMARY"
+      echo "| **Input**   | \`${INPUT_FILE}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      if [ "${ALLOW}" = "true" ]; then
+        echo "| **Result**  | ✅ Allowed |" >> "$GITHUB_STEP_SUMMARY"
+      else
+        echo "| **Result**  | ❌ Denied |" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "### Violations" >> "$GITHUB_STEP_SUMMARY"
+        echo '```json' >> "$GITHUB_STEP_SUMMARY"
+        echo "${VIOLATIONS}" >> "$GITHUB_STEP_SUMMARY"
+        echo '```' >> "$GITHUB_STEP_SUMMARY"
+      fi
+
+  - name: Fail on deny
+    if: ${{ inputs.fail-on-deny == 'true' && steps.eval.outputs.allow != 'true' }}
+    shell: bash
+    run: |
+      echo "::error::Policy data.${{ inputs.package }}.allow = false. See violations above."
+      exit 1

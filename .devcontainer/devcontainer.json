@@ -1,0 +1,41 @@
+{
+  "name": "repol",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers-contrib/features/opa:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "tsandall.opa",
+        "ms-python.python",
+        "ms-python.pylance",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml",
+        "github.vscode-github-actions"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "[rego]": {
+          "editor.defaultFormatter": "tsandall.opa"
+        }
+      }
+    }
+  },
+  "postCreateCommand": "pip install -e '.[dev,poc]' && echo '✅ repol dev environment ready'",
+  "remoteEnv": {
+    "PYTHONPATH": "src:."
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+  ],
+  "workspaceFolder": "/workspace"
+}

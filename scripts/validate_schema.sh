@@ -1,76 +1,134 @@
-#!/bin/bash
-# Validate github_env_protect_policy.json against github_env_protect_schema.json using jq
+#!/usr/bin/env bash
+# validate_schema.sh
+# Validates YAML policy configs (.repol/*.yaml) against JSON Schemas.
+# Converts YAML → JSON via yq or python, then validates with check-jsonschema or jq.
+set -euo pipefail
 
-# Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}Error: jq is required but not installed.${NC}"
-    echo "Install it with: brew install jq"
-    exit 1
-fi
-
-# Set default file paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GATE_DIR="$(dirname "$SCRIPT_DIR")/.governant"
-POLICY_FILE="$GATE_DIR/policies/github_env_protect_policy.json"
-SCHEMA_FILE="$GATE_DIR/schemas/github_env_protect_schema.json"
+ROOT="$(dirname "$SCRIPT_DIR")"
+REPOL_DIR="$ROOT/.repol"
+SCHEMAS_DIR="$ROOT/schemas"
 
-# Check if files exist
-if [ ! -f "$POLICY_FILE" ]; then
-    echo -e "${RED}Error: github_env_protect_policy.json not found at $POLICY_FILE${NC}"
-    exit 1
+# Map: YAML policy config → JSON Schema
+declare -A PAIRS=(
+  ["deploy.yaml"]="github_env_protect_schema.json"
+  ["pullrequest.yaml"]="github_pull_request_schema.json"
+)
+
+# ── Detect YAML→JSON converter ──────────────────────────────────────────────
+yaml_to_json() {
+  local yaml_file="$1"
+  if command -v yq &>/dev/null; then
+    yq -o=json "$yaml_file"
+  elif command -v python3 &>/dev/null; then
+    python3 -c "
+import sys, json, yaml
+with open(sys.argv[1]) as f:
+    json.dump(yaml.safe_load(f), sys.stdout)
+" "$yaml_file"
+  else
+    echo ""
+    return 1
+  fi
+}
+
+if ! command -v jq &>/dev/null; then
+  echo -e "${RED}Error: jq is required. Install: brew install jq${NC}"
+  exit 1
 fi
 
-if [ ! -f "$SCHEMA_FILE" ]; then
-    echo -e "${RED}Error: github_env_protect_schema.json not found at $SCHEMA_FILE${NC}"
-    exit 1
+# Check for a YAML converter
+HAS_CONVERTER=false
+if command -v yq &>/dev/null; then
+  HAS_CONVERTER=true
+elif python3 -c "import yaml" 2>/dev/null; then
+  HAS_CONVERTER=true
 fi
 
-echo -e "🔍 Validating $POLICY_FILE against $SCHEMA_FILE..."
-
-# Validate JSON syntax
-if ! jq empty "$POLICY_FILE" &>/dev/null; then
-    echo -e "${RED}❌ Invalid JSON in policy file${NC}"
-    jq . "$POLICY_FILE"  # This will show the error
-    exit 1
+if ! $HAS_CONVERTER; then
+  echo -e "${RED}Error: yq or python3 with PyYAML is required to convert YAML configs.${NC}"
+  echo "Install one of:"
+  echo "  brew install yq"
+  echo "  pip install pyyaml"
+  exit 1
 fi
 
-if ! jq empty "$SCHEMA_FILE" &>/dev/null; then
-    echo -e "${RED}❌ Invalid JSON in schema file${NC}"
-    jq . "$SCHEMA_FILE"  # This will show the error
-    exit 1
+USE_JSONSCHEMA=false
+if command -v check-jsonschema &>/dev/null; then
+  USE_JSONSCHEMA=true
 fi
 
-# Simple schema validation using jq
-# Note: This is a basic validation. For full JSON Schema validation, consider using check-jsonschema
-VALID=$(jq -e '[
-    . as $dot |
-    $dot | path(..) |
-    select(.[-1]? == "required" and ($dot | getpath(.) | type) == "array") |
-    .[0:-1] as $path |
-    $dot |
-    getpath($path) as $schema |
-    $schema.required as $required |
-    $required |
-    .[] |
-    . as $field |
-    ("\($path | join("."))" + 
-     (if $path | length > 0 then "." + $field else $field end)) as $path_str |
-    { "path": $path_str, "exists": (try ($dot | getpath(($path + [$field]))) catch false | type != "null") }
-] | map(select(.exists == false) | .path) | length == 0' "$POLICY_FILE" 2>/dev/null || echo "false")
+PASS=0
+FAIL=0
+SKIP=0
 
-if [ "$VALID" = "true" ]; then
-    echo -e "${GREEN}✅ Policy is valid according to the schema!${NC}"
-    exit 0
-else
-    echo -e "${RED}❌ Policy validation failed${NC}"
-    echo "For detailed validation, install check-jsonschema:"
-    echo "  pip install check-jsonschema"
-    echo "Then run:"
-    echo "  check-jsonschema --schemafile $SCHEMA_FILE $POLICY_FILE"
-    exit 1
+for POLICY_FILE in "${!PAIRS[@]}"; do
+  SCHEMA_FILE="${PAIRS[$POLICY_FILE]}"
+  POLICY_PATH="$REPOL_DIR/$POLICY_FILE"
+  SCHEMA_PATH="$SCHEMAS_DIR/$SCHEMA_FILE"
+
+  if [ ! -f "$POLICY_PATH" ]; then
+    echo -e "${YELLOW}⚠  SKIP: $POLICY_FILE not found in .repol/${NC}"
+    (( SKIP++ )) || true
+    continue
+  fi
+
+  if [ ! -f "$SCHEMA_PATH" ]; then
+    echo -e "${YELLOW}⚠  SKIP: schema $SCHEMA_FILE not found${NC}"
+    (( SKIP++ )) || true
+    continue
+  fi
+
+  # Convert YAML to JSON
+  TMP_JSON=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$TMP_JSON'" EXIT
+
+  if ! yaml_to_json "$POLICY_PATH" > "$TMP_JSON" 2>/dev/null; then
+    echo -e "${RED}❌ FAIL (invalid YAML): $POLICY_FILE${NC}"
+    (( FAIL++ )) || true
+    continue
+  fi
+
+  # Verify it's valid JSON
+  if ! jq empty "$TMP_JSON" &>/dev/null; then
+    echo -e "${RED}❌ FAIL (YAML→JSON conversion failed): $POLICY_FILE${NC}"
+    (( FAIL++ )) || true
+    continue
+  fi
+
+  if $USE_JSONSCHEMA; then
+    if check-jsonschema --schemafile "$SCHEMA_PATH" "$TMP_JSON" &>/dev/null; then
+      echo -e "${GREEN}✅ PASS: $POLICY_FILE${NC}"
+      (( PASS++ )) || true
+    else
+      echo -e "${RED}❌ FAIL: $POLICY_FILE does not validate against $SCHEMA_FILE${NC}"
+      check-jsonschema --schemafile "$SCHEMA_PATH" "$TMP_JSON" || true
+      (( FAIL++ )) || true
+    fi
+  else
+    # Structural check: confirm top-level "policy" key with "version" field
+    if jq -e '.policy.version' "$TMP_JSON" &>/dev/null; then
+      echo -e "${GREEN}✅ PASS (syntax + structure): $POLICY_FILE${NC}"
+      (( PASS++ )) || true
+    else
+      echo -e "${RED}❌ FAIL (missing .policy.version): $POLICY_FILE${NC}"
+      (( FAIL++ )) || true
+    fi
+  fi
+done
+
+echo ""
+echo "Results: ${PASS} passed, ${FAIL} failed, ${SKIP} skipped"
+
+if [ "$FAIL" -gt 0 ]; then
+  echo -e "${RED}Schema validation failed.${NC}"
+  exit 1
 fi
+
+echo -e "${GREEN}All schema validations passed.${NC}"

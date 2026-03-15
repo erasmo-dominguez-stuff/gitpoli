@@ -1,0 +1,43 @@
+services:
+  opa:
+    image: openpolicyagent/opa:latest
+    command: ["run", "--server", "--addr", ":8181", "--log-level", "info", "/policies"]
+    ports:
+      - "8181:8181"
+    volumes:
+      - ../../policies:/policies:ro
+
+  server:
+    build:
+      context: ../local/server
+    ports:
+      - "8080:8080"
+    environment:
+      OPA_URL: http://opa:8181
+      REPOL_DIR: /repol
+      AUDIT_DB: /data/audit.db
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      - ../../.repol:/repol:ro
+      - audit-data:/data
+    depends_on:
+      - opa
+
+  smee:
+    image: node:20-slim
+    command:
+      [
+        "npx",
+        "--yes",
+        "smee-client",
+        "--url",
+        "${SMEE_URL}",
+        "--target",
+        "http://server:8080/webhook",
+      ]
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  audit-data:

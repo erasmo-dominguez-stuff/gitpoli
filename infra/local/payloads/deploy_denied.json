@@ -1,0 +1,28 @@
+{
+  "environment": "production",
+  "ref": "refs/heads/feature/xyz",
+  "repo_environments": ["production", "staging", "development"],
+  "workflow_meta": {
+    "approvers": ["alice", "bob"],
+    "checks": { "tests": true },
+    "signed_off": true,
+    "deployments_today": 1
+  },
+  "repo_policy": {
+    "policy": {
+      "version": "1.0.0",
+      "environments": {
+        "production": {
+          "enabled": true,
+          "rules": {
+            "approvals_required": 2,
+            "allowed_branches": ["main"],
+            "tests_passed": true,
+            "signed_off": true,
+            "max_deployments_per_day": 5
+          }
+        }
+      }
+    }
+  }
+}

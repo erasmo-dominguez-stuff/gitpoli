@@ -1,5 +1,7 @@
 # CODEOWNERS
-# All files under .governant/ are owned by the GitHub team 'governant-admin'.
-# Note: To require their review for merges, enable branch protection and
-# turn on "Require review from Code Owners" in repository settings.
-/.governant/** @erasmo-dominguez-stuff/governant-admin
+# Policy code, schemas, and team configuration are owned by the governant-admin team.
+# Enables "Require review from Code Owners" in branch protection settings.
+
+/policies/**  @erasmo-dominguez-stuff/governant-admin
+/schemas/**   @erasmo-dominguez-stuff/governant-admin
+/.repol/**    @erasmo-dominguez-stuff/governant-admin

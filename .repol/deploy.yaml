@@ -1,0 +1,41 @@
+# governant – Deployment Protection Policy Configuration
+# This file is placed in .repol/ of each repository that adopts governant.
+# Teams edit this YAML to define deployment rules per environment.
+
+policy:
+  version: "1.0.0"
+
+  metadata:
+    description: Deployment environment protection policy
+    last_updated: "2026-03-15"
+
+  environments:
+    production:
+      enabled: true
+      rules:
+        approvals_required: 2
+        allowed_branches:
+        - main
+        tests_passed: true
+        signed_off: true
+        max_deployments_per_day: 5
+
+    staging:
+      enabled: true
+      rules:
+        approvals_required: 1
+        allowed_branches:
+        - main
+        - develop
+        tests_passed: true
+        signed_off: false
+        max_deployments_per_day: 20
+
+    development:
+      enabled: true
+      rules:
+        approvals_required: 0
+        allowed_branches: null
+        tests_passed: false
+        signed_off: false
+        max_deployments_per_day: 50

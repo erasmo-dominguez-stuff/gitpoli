@@ -1,0 +1,28 @@
+{
+  "head_ref": "feature/login",
+  "base_ref": "production",
+  "repo_policy": {
+    "policy": {
+      "version": "1.0",
+      "branch_rules": [
+        { "source": "feature/*", "target": "develop" },
+        { "source": "feature/*", "target": "main" },
+        { "source": "bugfix/*", "target": "develop" },
+        { "source": "bugfix/*", "target": "main" },
+        { "source": "hotfix/*", "target": "main" },
+        { "source": "hotfix/*", "target": "release/*" },
+        { "source": "release/*", "target": "main" },
+        { "source": "develop", "target": "main" }
+      ],
+      "rules": {
+        "allowed_target_branches": ["main", "develop"],
+        "approvals_required": 1,
+        "signed_off": false
+      }
+    }
+  },
+  "workflow_meta": {
+    "approvers": ["erasmo"],
+    "signed_off": false
+  }
+}

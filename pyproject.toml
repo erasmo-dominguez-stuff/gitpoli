@@ -5,10 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "governant"
 version = "0.1.0"
-description = "Python wrapper for OPA policies with GitHub integration"
-authors = [{ name = "Erasmo Dominguez", email = "erasmo@example.com" }]
+description = "Policy-as-code framework using OPA for GitHub workflow governance"
+authors = [{ name = "Erasmo Dominguez" }]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -16,89 +16,20 @@ classifiers = [
   "Intended Audience :: System Administrators",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Topic :: Security",
-  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = [
-  "requests>=2.31.0",
-  "jsonschema>=4.19.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
-# Instálalo si quieres ejecutar WASM embebido sin CLI de opa:
-wasm = [
-  "opa-wasm>=0.3.0",
-]
 dev = [
-  "pytest>=8.0.0",
-  "pytest-cov>=4.1.0",
-  "pytest-mock>=3.12.0",
-  "black>=24.0.0",
-  "isort>=5.13.0",
-  "mypy>=1.7.0",
-  "flake8>=7.0.0",
-  "types-requests>=2.31.0",
   "pre-commit>=3.5.0",
 ]
 
-[project.scripts]
-# CLI principal
-governant = "governant.cli:main"
-
-[tool.black]
-line-length = 100
-target-version = ["py38"]
-include = '\.pyi?$'
-
-[tool.isort]
-profile = "black"
-line_length = 100
-known_first_party = ["governant"]
-
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-strict_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-disallow_untyped_decorators = true
-disallow_incomplete_defs = true
-disallow_untyped_calls = true
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = "-v --cov=governant --cov-report=term-missing"
-
-[tool.coverage.run]
-source = ["governant"]
-omit = ["tests/*"]
-
 [project.urls]
-Homepage = "https://github.com/yourusername/governant"
-Documentation = "https://github.com/yourusername/governant#readme"
-Issues = "https://github.com/yourusername/governant/issues"
-Source = "https://github.com/yourusername/governant"
+Homepage = "https://github.com/erasmo-dominguez-stuff/governant"
+Issues = "https://github.com/erasmo-dominguez-stuff/governant/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/governant", "src/opawasm"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-  "src/governant/**",
-  "src/opawasm/**",
-  "pyproject.toml",
-  "README.md",
-  "examples/**",
-]
+packages = []
