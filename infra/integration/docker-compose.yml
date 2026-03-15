@@ -16,9 +16,8 @@ services:
       OPA_URL: http://opa:8181
       REPOL_DIR: /repol
       AUDIT_DB: /data/audit.db
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-/secrets/app.pem}
+      GITHUB_APP_ID: ${GITHUB_APP_ID}
+      GITHUB_APP_PRIVATE_KEY_PATH: /secrets/app.pem
     volumes:
       - ../../.repol:/repol:ro
       - audit-data:/data

@@ -1,20 +1,18 @@
-"""GitHub API client — supports GitHub App (JWT) and PAT authentication.
+"""GitHub API client — authenticates as a GitHub App (JWT).
 
-When GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY_PATH are set the server
-authenticates as a GitHub App, generating short-lived installation tokens
-from the installation_id present in every webhook payload.
-
-Falls back to a static GITHUB_TOKEN (PAT) if no App credentials are
-configured.
+Requires GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY_PATH.  The server
+generates short-lived installation tokens from the installation_id
+present in every webhook payload.
 """
 
 import logging
 import time
+from typing import Optional
 
 import httpx
 import jwt
 
-from .config import GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_PATH, GITHUB_TOKEN
+from .config import GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_PATH
 
 logger = logging.getLogger("policy-server")
 
@@ -27,7 +25,7 @@ _COMMON_HEADERS = {
 
 # ── GitHub App JWT ────────────────────────────────────────────────────────────
 
-_private_key: str | None = None
+_private_key: Optional[str] = None
 
 
 def _load_private_key() -> str:
@@ -70,19 +68,16 @@ def is_app_configured() -> bool:
 # ── Resolve auth header ──────────────────────────────────────────────────────
 
 
-async def _auth_header(installation_id: int | None) -> dict[str, str]:
-    """Return the Authorization header for a GitHub API call.
-
-    Prefers GitHub App auth when configured; falls back to PAT.
-    """
-    if is_app_configured() and installation_id:
-        token = await _get_installation_token(installation_id)
-        return {"Authorization": f"token {token}"}
-
-    if GITHUB_TOKEN:
-        return {"Authorization": f"token {GITHUB_TOKEN}"}
-
-    return {}
+async def _auth_header(installation_id: Optional[int]) -> dict:
+    """Return the Authorization header for a GitHub API call."""
+    if not is_app_configured():
+        logger.error("GitHub App not configured (GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY_PATH)")
+        return {}
+    if not installation_id:
+        logger.error("No installation_id in webhook payload — cannot authenticate")
+        return {}
+    token = await _get_installation_token(installation_id)
+    return {"Authorization": f"token {token}"}
 
 
 # ── Callback ──────────────────────────────────────────────────────────────────
@@ -94,7 +89,7 @@ async def github_callback(
     violations: list,
     audit_id: str,
     *,
-    installation_id: int | None = None,
+    installation_id: Optional[int] = None,
 ):
     """POST back to GitHub deployment_callback_url to approve/reject.
 
@@ -140,7 +135,7 @@ async def github_callback(
             "GitHub callback status=%d state=%s auth=%s",
             resp.status_code,
             state,
-            "app" if is_app_configured() and installation_id else "token",
+            "app" if installation_id else "none",
         )
     except Exception as exc:
         logger.error("GitHub callback failed: %s", exc)

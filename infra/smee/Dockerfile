@@ -1,6 +1,9 @@
-FROM node:20-alpine
+FROM alpine:3.20
 
-RUN npm install -g smee-client
+RUN apk add --no-cache nodejs npm curl && \
+    npm install -g smee-client && \
+    apk del npm && \
+    rm -rf /root/.npm /tmp/*
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

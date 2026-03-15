@@ -8,6 +8,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 AUDIT_DB = Path(os.getenv("AUDIT_DB", "/data/audit.db"))
 
@@ -110,7 +111,7 @@ def record(
     return row
 
 
-def get_by_id(event_id: str) -> dict | None:
+def get_by_id(event_id: str) -> Optional[dict]:
     """Retrieve a single audit event by ID."""
     with _conn() as db:
         row = db.execute(
@@ -124,10 +125,10 @@ def get_by_id(event_id: str) -> dict | None:
 def query(
     *,
     limit: int = 50,
-    policy: str | None = None,
-    decision: str | None = None,
-    since: str | None = None,
-    environment: str | None = None,
+    policy: Optional[str] = None,
+    decision: Optional[str] = None,
+    since: Optional[str] = None,
+    environment: Optional[str] = None,
 ) -> list[dict]:
     """Query audit events with optional filters."""
     clauses = []

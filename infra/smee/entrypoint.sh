@@ -6,8 +6,7 @@ TARGET="${SMEE_TARGET:-http://server:8080/webhook}"
 # Auto-create smee channel if URL not provided
 if [ -z "${SMEE_URL}" ] || [ "${SMEE_URL}" = "https://smee.io/YOUR_CHANNEL_ID" ]; then
   echo "SMEE_URL not set — creating new smee.io channel..."
-  SMEE_URL=$(wget -q -O /dev/null -S --max-redirect=0 https://smee.io/new 2>&1 \
-    | grep -i '^  Location:' | awk '{print $2}' | tr -d '\r') || true
+  SMEE_URL=$(curl -sfL -o /dev/null -w '%{url_effective}' https://smee.io/new 2>/dev/null) || true
 
   if [ -z "${SMEE_URL}" ]; then
     echo "ERROR: Could not auto-create smee channel."

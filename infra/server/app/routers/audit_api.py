@@ -1,5 +1,7 @@
 """Audit trail query endpoints."""
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import audit
@@ -10,10 +12,10 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 @router.get("")
 async def get_audit(
     limit: int = Query(50, ge=1, le=500),
-    policy: str | None = Query(None),
-    decision: str | None = Query(None),
-    since: str | None = Query(None, description="ISO timestamp"),
-    environment: str | None = Query(None),
+    policy: Optional[str] = Query(None),
+    decision: Optional[str] = Query(None),
+    since: Optional[str] = Query(None, description="ISO timestamp"),
+    environment: Optional[str] = Query(None),
 ):
     """Query audit events with optional filters."""
     return audit.query(

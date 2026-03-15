@@ -3,7 +3,7 @@ set -euo pipefail
 #
 # Sets up the integration environment:
 # 1. Creates a smee.io channel (or reuses SMEE_URL from .env)
-# 2. Validates GITHUB_TOKEN is set
+# 2. Validates GitHub App credentials are set
 # 3. Prints instructions for configuring the GitHub repo
 #
 
@@ -51,14 +51,36 @@ else
   echo -e "${GREEN}Using existing smee channel: ${SMEE_URL}${NC}"
 fi
 
-# ── GitHub token ─────────────────────────────────────────────────────────────
+# ── GitHub App credentials ───────────────────────────────────────────────────
 
-if [ -z "${GITHUB_TOKEN:-}" ] || [ "$GITHUB_TOKEN" = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" ]; then
+ERRORS=0
+
+if [ -z "${GITHUB_APP_ID:-}" ]; then
   echo ""
-  echo -e "${RED}GITHUB_TOKEN not set in .env${NC}"
-  echo "Create a token at: https://github.com/settings/tokens"
-  echo "Required scope: repo (classic) or actions:write (fine-grained)"
-  echo "Then edit: ${ENV_FILE}"
+  echo -e "${RED}GITHUB_APP_ID not set in .env${NC}"
+  echo "Set the App ID from your GitHub App → General → App ID"
+  ERRORS=1
+fi
+
+PEM_FILE="${GITHUB_APP_PRIVATE_KEY_FILE:-./app.pem}"
+# Resolve relative to the .env dir
+if [[ "$PEM_FILE" != /* ]]; then
+  PEM_FILE="${SCRIPT_DIR}/../${PEM_FILE}"
+fi
+
+if [ ! -f "$PEM_FILE" ]; then
+  echo ""
+  echo -e "${RED}Private key not found: ${PEM_FILE}${NC}"
+  echo "Download the .pem file from your GitHub App → General → Private keys"
+  echo "Place it at: infra/integration/app.pem"
+  ERRORS=1
+else
+  echo -e "${GREEN}Private key found: ${PEM_FILE}${NC}"
+fi
+
+if [ "$ERRORS" -ne 0 ]; then
+  echo ""
+  echo -e "${RED}Fix the errors above, then re-run: make integration-setup${NC}"
   echo ""
 fi
 
@@ -67,23 +89,25 @@ fi
 echo ""
 echo -e "${BOLD}═══ Integration Setup ═══${NC}"
 echo ""
-echo -e "  ${BOLD}1.${NC} Set GITHUB_TOKEN in ${ENV_FILE}"
+echo -e "  ${BOLD}1.${NC} Set GITHUB_APP_ID and place app.pem in ${SCRIPT_DIR}/.."
 echo ""
-echo -e "  ${BOLD}2.${NC} Add a webhook to your GitHub repo:"
+echo -e "  ${BOLD}2.${NC} Install your GitHub App on the target repository:"
+echo "     → https://github.com/settings/apps → Install App → Select repo"
+echo ""
+echo -e "  ${BOLD}3.${NC} Add a webhook (or let the App deliver events):"
 echo "     → Settings → Webhooks → Add webhook"
 echo -e "     Payload URL:  ${CYAN}${SMEE_URL}${NC}"
 echo "     Content type: application/json"
 echo "     Events:       ☑ Deployment protection rules"
 echo ""
-echo -e "  ${BOLD}3.${NC} Enable the custom deployment protection rule:"
+echo -e "  ${BOLD}4.${NC} Enable the custom deployment protection rule:"
 echo "     → Settings → Environments → (select env) → Deployment protection rules"
 echo "     → Enable your webhook-based rule"
 echo ""
-echo -e "  ${BOLD}4.${NC} Start the integration stack:"
+echo -e "  ${BOLD}5.${NC} Start the integration stack:"
 echo -e "     ${CYAN}make integration-up${NC}"
 echo ""
-echo -e "  ${BOLD}5.${NC} Trigger a deployment (push to main, or use workflow_dispatch)"
-echo "     and watch the audit trail:"
+echo -e "  ${BOLD}6.${NC} Trigger a deployment and watch the audit trail:"
 echo -e "     ${CYAN}curl -s http://localhost:8080/audit | jq .${NC}"
 echo ""
 echo -e "${BOLD}═══════════════════════${NC}"
