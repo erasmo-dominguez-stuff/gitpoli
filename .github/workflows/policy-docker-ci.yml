@@ -8,12 +8,14 @@ on:
       - '.repol/**'
       - 'infra/local/**'
       - 'infra/server/**'
+      - 'infra/smee/**'
   pull_request:
     paths:
       - 'policies/**'
       - '.repol/**'
       - 'infra/local/**'
       - 'infra/server/**'
+      - 'infra/smee/**'
 
 jobs:
   # ── Standalone OPA runner image ─────────────────────────────────────────────

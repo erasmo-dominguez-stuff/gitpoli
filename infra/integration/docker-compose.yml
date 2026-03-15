@@ -27,17 +27,11 @@ services:
       - opa
 
   smee:
-    image: node:20-slim
-    command:
-      [
-        "npx",
-        "--yes",
-        "smee-client",
-        "--url",
-        "${SMEE_URL}",
-        "--target",
-        "http://server:8080/webhook",
-      ]
+    build:
+      context: ../smee
+    environment:
+      SMEE_URL: ${SMEE_URL:-}
+      SMEE_TARGET: http://server:8080/webhook
     depends_on:
       - server
     restart: unless-stopped
