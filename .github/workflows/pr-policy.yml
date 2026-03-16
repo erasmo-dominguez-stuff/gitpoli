@@ -1,11 +1,12 @@
 name: PR Policy Check
 
 on:
-  pull_request:
-    branches: [main, develop]
-    types: [opened, synchronize, reopened]
-  pull_request_review:
-    types: [submitted]
+  workflow_dispatch:  # Temporarily disabled — PR policy runs via GitHub App webhook
+  # pull_request:
+  #   branches: [main, develop]
+  #   types: [opened, synchronize, reopened]
+  # pull_request_review:
+  #   types: [submitted]
 
 jobs:
   collect:

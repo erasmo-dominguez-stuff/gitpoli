@@ -10,6 +10,8 @@ Provides both:
   - POST /webhook/pull_request               — direct endpoint
 """
 
+import logging
+
 import yaml
 from fastapi import APIRouter, HTTPException, Request
 
@@ -17,6 +19,8 @@ from ..config import REPOL_DIR
 from ..github import get_pr_approvers, github_callback, github_check_run
 from ..helpers import record_audit
 from ..opa import query_opa
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -63,6 +67,8 @@ async def webhook_dispatch(request: Request):
     """
     event_type = request.headers.get("X-GitHub-Event", "")
     body = await request.json()
+    action = body.get("action", "")
+    logger.info("Received event=%s action=%s", event_type, action)
 
     if event_type == "deployment_protection_rule":
         return await _handle_deploy(request, body)
