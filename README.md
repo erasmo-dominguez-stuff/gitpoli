@@ -537,3 +537,5 @@ make lint test    # run all checks
 ---
 
 MIT © 2026 Erasmo Domínguez
+
+
