@@ -66,13 +66,13 @@ async def webhook_dispatch(request: Request):
 
     if event_type == "deployment_protection_rule":
         return await _handle_deploy(request, body)
+    if event_type == "deployment":
+        return await _handle_deploy(request, body)
     if event_type == "pull_request":
         return await _handle_pr(request, body)
 
-    raise HTTPException(
-        status_code=400,
-        detail=f"Unsupported or missing X-GitHub-Event: {event_type}",
-    )
+    # Acknowledge events we don't act on (ping, workflow_run, etc.)
+    return {"event": event_type, "action": "ignored"}
 
 
 # ── Deployment protection rule ────────────────────────────────────────────────
@@ -86,7 +86,13 @@ async def webhook_deploy(request: Request):
 
 
 async def _handle_deploy(request: Request, event: dict) -> dict:
-    """Core logic for deployment protection rule evaluation.
+    """Core logic for deployment policy evaluation.
+
+    Supports two GitHub event shapes:
+      - deployment_protection_rule: has event["deployment"]["ref"] and
+        event["deployment_callback_url"]
+      - deployment: has event["deployment"]["ref"] and
+        event["deployment"]["environment"]
 
     Optional headers for workflow metadata not present in the webhook:
       X-Approvers            comma-separated logins
@@ -94,8 +100,8 @@ async def _handle_deploy(request: Request, event: dict) -> dict:
       X-Signed-Off           true / false
       X-Deployments-Today    integer
     """
-    environment = event.get("environment", "")
     deployment = event.get("deployment", {})
+    environment = event.get("environment") or deployment.get("environment", "")
     ref = deployment.get("ref", "")
     if ref and not ref.startswith("refs/"):
         ref = f"refs/heads/{ref}"
@@ -129,6 +135,7 @@ async def _handle_deploy(request: Request, event: dict) -> dict:
             resp["allow"],
             resp["violations"],
             resp["audit_id"],
+            environment_name=environment,
             installation_id=installation_id,
         )
         resp["callback_url"] = callback_url

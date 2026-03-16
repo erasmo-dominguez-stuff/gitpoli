@@ -80,3 +80,5 @@ htmlcov/
 # Backup files
 *.orig
 *.rej
+
+infra/integration/priv.pem

@@ -89,6 +89,7 @@ async def github_callback(
     violations: list,
     audit_id: str,
     *,
+    environment_name: str = "",
     installation_id: Optional[int] = None,
 ):
     """POST back to GitHub deployment_callback_url to approve/reject.
@@ -101,6 +102,7 @@ async def github_callback(
         allow: Whether the policy allows the deployment.
         violations: List of violation dicts.
         audit_id: ID of the audit event for traceability.
+        environment_name: GitHub environment name (required by the API).
         installation_id: GitHub App installation ID (from webhook payload).
     """
     if not callback_url:
@@ -119,7 +121,7 @@ async def github_callback(
         comment_parts.append(f"Violations: {codes}")
 
     payload = {
-        "environment_name": "",
+        "environment_name": environment_name,
         "state": state,
         "comment": ". ".join(comment_parts),
     }
@@ -131,10 +133,17 @@ async def github_callback(
                 json=payload,
                 headers={**_COMMON_HEADERS, **auth},
             )
+        if resp.status_code >= 400:
+            logger.warning(
+                "GitHub callback error status=%d body=%s",
+                resp.status_code,
+                resp.text[:500],
+            )
         logger.info(
-            "GitHub callback status=%d state=%s auth=%s",
+            "GitHub callback status=%d state=%s env=%s auth=%s",
             resp.status_code,
             state,
+            environment_name,
             "app" if installation_id else "none",
         )
     except Exception as exc:

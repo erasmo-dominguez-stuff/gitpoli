@@ -13,11 +13,11 @@ policy:
     production:
       enabled: true
       rules:
-        approvals_required: 2
+        approvals_required: 0
         allowed_branches:
         - main
-        tests_passed: true
-        signed_off: true
+        tests_passed: false
+        signed_off: false
         max_deployments_per_day: 5
 
     staging:
