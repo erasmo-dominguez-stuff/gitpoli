@@ -1,4 +1,9 @@
-"""Shared request-processing helpers used across routers."""
+"""Shared utilities used across router modules.
+
+Keeps common response-formatting and audit-recording logic in one place
+so each router only calls ``record_audit`` and gets a fully populated
+response dict back.
+"""
 
 import logging
 
@@ -6,11 +11,15 @@ from fastapi import Request
 
 from . import audit
 
-logger = logging.getLogger("policy-server")
+logger = logging.getLogger(__name__)
 
 
 def format_response(result: dict) -> dict:
-    """Normalize an OPA result into {allow, violations} with sorted violations."""
+    """Normalise an OPA result dict into ``{allow, violations}``.
+
+    Violations are sorted by code so responses are deterministic and easy
+    to compare in tests.
+    """
     return {
         "allow": result.get("allow", False),
         "violations": sorted(
@@ -26,7 +35,12 @@ def record_audit(
     request: Request,
     source: str = "api",
 ) -> dict:
-    """Format result, record an audit event, and return the enriched response."""
+    """Format the OPA result, write an audit event, and return the combined response.
+
+    Returns a dict with ``allow``, ``violations``, and ``audit_id`` keys.
+    Routers can add extra fields (e.g. ``input``, ``check_run_posted``) before
+    returning the dict to the caller.
+    """
     resp = format_response(result)
     event = audit.record(
         policy=policy,

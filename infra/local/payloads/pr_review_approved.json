@@ -1,0 +1,20 @@
+{
+  "action": "submitted",
+  "review": {
+    "state": "approved",
+    "user": { "login": "erasmo" }
+  },
+  "pull_request": {
+    "number": 42,
+    "head": {
+      "sha": "abc1234567890abc1234567890abc1234567890ab",
+      "ref": "feature/login"
+    },
+    "base": {
+      "ref": "develop"
+    }
+  },
+  "repository": {
+    "full_name": "erasmo-dominguez-stuff/gitpoli"
+  }
+}

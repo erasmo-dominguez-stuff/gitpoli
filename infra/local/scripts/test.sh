@@ -34,10 +34,21 @@ run_test() {
   local endpoint="$2"
   local payload="$3"
   local expect_allow="$4"
+  # Optional: space-separated "Key:Value" pairs, e.g. "X-Approvers:user1"
+  local extra_headers="${5:-}"
+
+  local curl_extra_args=()
+  if [ -n "$extra_headers" ]; then
+    IFS=' ' read -r -a header_list <<< "$extra_headers"
+    for h in "${header_list[@]}"; do
+      curl_extra_args+=(-H "$h")
+    done
+  fi
 
   printf "  %-50s " "${name}"
   RESULT=$(curl -sf -X POST "${BASE_URL}${endpoint}" \
     -H "Content-Type: application/json" \
+    "${curl_extra_args[@]}" \
     -d "@${payload}" 2>&1) || {
     echo -e "${RED}FAIL (curl error)${NC}"
     FAIL=$((FAIL + 1))
@@ -68,6 +79,18 @@ run_test "Valid PR (feature/login -> develop)" \
 run_test "Denied PR (branch naming violation)" \
   "/evaluate/pullrequest" \
   "${PAYLOADS_DIR}/pr_denied.json" \
+  "false"
+
+# Webhook endpoint: simulates pull_request_review events.
+# Approver is extracted dynamically from the review payload (no hardcoded header).
+run_test "PR review approved (webhook, approver from payload → allow)" \
+  "/webhook/pull_request_review" \
+  "${PAYLOADS_DIR}/pr_review_approved.json" \
+  "true"
+
+run_test "PR review changes_requested (webhook, no approver → deny)" \
+  "/webhook/pull_request_review" \
+  "${PAYLOADS_DIR}/pr_review_changes_requested.json" \
   "false"
 
 # ── Deploy Policy ───────────────────────────────────────────────────────────

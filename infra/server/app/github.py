@@ -1,8 +1,18 @@
 """GitHub API client — authenticates as a GitHub App (JWT).
 
-Requires GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY_PATH.  The server
-generates short-lived installation tokens from the installation_id
-present in every webhook payload.
+The server authenticates as a GitHub App and generates short-lived
+installation access tokens on demand.  The installation_id that GitHub
+includes in every webhook payload is what ties a request to a specific
+repository, so no static token per-repo is needed.
+
+Flow:
+  1. Generate a signed JWT using the App's RSA private key.
+  2. Exchange the JWT for an installation token (valid 1 hour).
+  3. Use the installation token for all GitHub API calls in that request.
+
+Private key sources (in order of preference):
+  GITHUB_APP_PRIVATE_KEY_PATH — path to a .pem file (local / Docker mount)
+  GITHUB_APP_PRIVATE_KEY      — raw PEM content (cloud envs, e.g. Azure secrets)
 """
 
 import logging
@@ -12,10 +22,10 @@ from typing import Optional
 import httpx
 import jwt
 
-from .config import GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_PATH
 from . import audit
+from .config import GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_PRIVATE_KEY_PATH
 
-logger = logging.getLogger("policy-server")
+logger = logging.getLogger(__name__)
 
 _GITHUB_API = "https://api.github.com"
 _COMMON_HEADERS = {
@@ -26,31 +36,61 @@ _COMMON_HEADERS = {
 
 # ── GitHub App JWT ────────────────────────────────────────────────────────────
 
+# The private key is loaded once and cached.  It never changes at runtime,
+# so there is no need to reload it between requests.
 _private_key: Optional[str] = None
 
 
 def _load_private_key() -> str:
-    """Read the PEM private key from disk (cached after first call)."""
+    """Return the RSA private key PEM string, loading it on the first call.
+
+    Checks GITHUB_APP_PRIVATE_KEY_PATH (file) before falling back to the
+    GITHUB_APP_PRIVATE_KEY env var (inline PEM content).  This allows the
+    same image to be used in both local (file mount) and cloud (env secret)
+    deployments without any code change.
+
+    Raises:
+        RuntimeError: If neither source is configured.
+    """
     global _private_key
-    if _private_key is None:
-        with open(GITHUB_APP_PRIVATE_KEY_PATH) as f:
-            _private_key = f.read()
+    if _private_key is not None:
+        return _private_key
+    if GITHUB_APP_PRIVATE_KEY_PATH:
+        with open(GITHUB_APP_PRIVATE_KEY_PATH) as fh:
+            _private_key = fh.read()
+    elif GITHUB_APP_PRIVATE_KEY:
+        # Inline PEM — useful when mounting files is not an option.
+        _private_key = GITHUB_APP_PRIVATE_KEY
+    else:
+        raise RuntimeError(
+            "No GitHub App private key configured. "
+            "Set GITHUB_APP_PRIVATE_KEY_PATH or GITHUB_APP_PRIVATE_KEY."
+        )
     return _private_key
 
 
 def _generate_jwt() -> str:
-    """Create a short-lived JWT signed with the App's private key."""
+    """Create a short-lived JWT signed with the App's RSA private key.
+
+    GitHub accepts JWTs valid for at most 10 minutes.  We subtract 60 s
+    from iat to account for clock drift between this server and GitHub.
+    """
     now = int(time.time())
     payload = {
-        "iat": now - 60,  # clock drift margin
-        "exp": now + (10 * 60),  # 10 min max
+        "iat": now - 60,   # issued-at with clock-drift margin
+        "exp": now + 600,  # 10-minute expiry (GitHub maximum)
         "iss": GITHUB_APP_ID,
     }
     return jwt.encode(payload, _load_private_key(), algorithm="RS256")
 
 
 async def _get_installation_token(installation_id: int) -> str:
-    """Exchange the App JWT for a scoped installation access token."""
+    """Exchange a GitHub App JWT for a scoped installation access token.
+
+    Installation tokens are valid for 1 hour.  We don't cache them here
+    because each webhook request is short-lived; add caching if request
+    volume justifies it.
+    """
     url = f"{_GITHUB_API}/app/installations/{installation_id}/access_tokens"
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
@@ -62,17 +102,24 @@ async def _get_installation_token(installation_id: int) -> str:
 
 
 def is_app_configured() -> bool:
-    """True when GitHub App credentials are available."""
-    return bool(GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH)
+    """Return True when the minimum GitHub App credentials are present."""
+    return bool(GITHUB_APP_ID and (GITHUB_APP_PRIVATE_KEY_PATH or GITHUB_APP_PRIVATE_KEY))
 
 
 # ── Resolve auth header ──────────────────────────────────────────────────────
 
 
-async def _auth_header(installation_id: Optional[int]) -> dict:
-    """Return the Authorization header for a GitHub API call."""
+async def _auth_header(installation_id: Optional[int]) -> dict[str, str]:
+    """Build the Authorization header needed for a GitHub API call.
+
+    Returns an empty dict (instead of raising) so callers can decide
+    whether to skip the API call or log a warning.
+    """
     if not is_app_configured():
-        logger.error("GitHub App not configured (GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY_PATH)")
+        logger.error(
+            "GitHub App not configured — set GITHUB_APP_ID and "
+            "GITHUB_APP_PRIVATE_KEY_PATH (or GITHUB_APP_PRIVATE_KEY)"
+        )
         return {}
     if not installation_id:
         logger.error("No installation_id in webhook payload — cannot authenticate")
@@ -87,24 +134,25 @@ async def _auth_header(installation_id: Optional[int]) -> dict:
 async def github_callback(
     callback_url: str,
     allow: bool,
-    violations: list,
+    violations: list[dict],
     audit_id: str,
     *,
     environment_name: str = "",
     installation_id: Optional[int] = None,
-):
-    """POST back to GitHub deployment_callback_url to approve/reject.
+) -> None:
+    """POST back to GitHub to approve or reject a deployment protection rule.
 
-    GitHub custom deployment protection rules require the app to call
-    back asynchronously to signal the decision.
+    GitHub's custom deployment protection rules require the App to call back
+    asynchronously — the webhook handler returns immediately and the decision
+    is communicated via this endpoint.
 
     Args:
-        callback_url: The deployment_callback_url from the webhook payload.
-        allow: Whether the policy allows the deployment.
-        violations: List of violation dicts.
-        audit_id: ID of the audit event for traceability.
+        callback_url: The ``deployment_callback_url`` from the webhook payload.
+        allow: True → approved, False → rejected.
+        violations: Violation dicts from the OPA evaluation (may be empty).
+        audit_id: Audit event ID included in the comment for traceability.
         environment_name: GitHub environment name (required by the API).
-        installation_id: GitHub App installation ID (from webhook payload).
+        installation_id: Installation ID used to obtain an access token.
     """
     if not callback_url:
         logger.debug("No callback URL — skipping GitHub callback")
@@ -161,14 +209,18 @@ async def github_check_run(
     repo_full_name: str,
     head_sha: str,
     allow: bool,
-    violations: list,
+    violations: list[dict],
     audit_id: str,
     installation_id: Optional[int],
-):
-    """Create or update a GitHub Check Run with the PR policy result.
+) -> None:
+    """Create a GitHub Check Run that reports the PR policy decision.
 
-    The check run name 'gitpoli / PR Policy' must be added as a required
-    status check in branch protection rules to block merging on deny.
+    The check run name ``gitpoli / PR Policy`` must be configured as a
+    required status check in branch protection rules so that a deny
+    blocks the PR from merging.
+
+    A new check run is created (not updated) on every evaluation.  GitHub
+    automatically supersedes older runs for the same SHA and name.
     """
     auth = await _auth_header(installation_id)
     if not auth:
@@ -229,7 +281,13 @@ async def get_pr_approvers(
     pr_number: int,
     installation_id: Optional[int],
 ) -> list[str]:
-    """Fetch the list of GitHub logins who approved a PR."""
+    """Return the GitHub logins of all reviewers who currently approve the PR.
+
+    Iterates all submitted reviews and collects unique logins whose latest
+    state is ``APPROVED``.  Reviews that were later dismissed or superseded
+    by a ``changes_requested`` review from the same user are excluded because
+    only the most recent review per user is counted by GitHub itself.
+    """
     auth = await _auth_header(installation_id)
     if not auth:
         return []

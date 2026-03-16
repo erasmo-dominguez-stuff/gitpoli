@@ -1,16 +1,29 @@
-"""Audit trail — records every policy evaluation for traceability."""
+"""Audit trail — records every policy evaluation for traceability.
+
+Every call to the webhook and evaluate endpoints writes an audit event to a
+SQLite database.  This gives operators a searchable history of all policy
+decisions with the inputs and outcomes that produced them.
+
+The database path is read from config.AUDIT_DB so it can be pointed at a
+persistent volume in production without any code change.
+"""
 
 import hashlib
 import json
-import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
-AUDIT_DB = Path(os.getenv("AUDIT_DB", "/data/audit.db"))
+from .config import AUDIT_DB as _AUDIT_DB_STR
+
+from pathlib import Path
+
+# Resolve the audit DB path once at import time.  The value comes from the
+# AUDIT_DB environment variable (set in config.py) so it is fully configurable
+# without touching this module.
+AUDIT_DB: Path = Path(_AUDIT_DB_STR)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -33,7 +46,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_decision ON audit_events(decision);
 
 
 @contextmanager
-def _conn():
+def _conn() -> Generator[sqlite3.Connection, None, None]:
+    """Context manager that yields an open SQLite connection and auto-commits.
+
+    Creates the parent directory on first use so the server does not need a
+    pre-existing /data directory in the container image.
+    """
     AUDIT_DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(AUDIT_DB))
     db.row_factory = sqlite3.Row
@@ -44,15 +62,16 @@ def _conn():
         db.close()
 
 
-def _deserialize_row(row) -> dict:
-    """Convert a sqlite3.Row to a dict with parsed JSON fields."""
+def _deserialize_row(row: sqlite3.Row) -> dict:
+    """Convert a sqlite3.Row to a plain dict with JSON fields parsed."""
     d = dict(row)
     d["violations"] = json.loads(d["violations"])
     d["meta"] = json.loads(d["meta"])
     return d
 
 
-def init_db():
+def init_db() -> None:
+    """Create the audit_events table and indexes if they do not yet exist."""
     with _conn() as db:
         db.executescript(_SCHEMA)
 
@@ -61,12 +80,16 @@ def record(
     *,
     policy: str,
     decision: bool,
-    violations: list,
+    violations: list[dict],
     input_data: dict,
     actor: str = "",
     source: str = "",
 ) -> dict:
-    """Write an audit event and return it."""
+    """Write a policy evaluation audit event and return it as a dict.
+
+    ``input_data`` is hashed (not stored) to keep the audit log compact while
+    still allowing verification that the same input was used twice.
+    """
     event_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -150,7 +173,13 @@ def query(
     since: Optional[str] = None,
     environment: Optional[str] = None,
 ) -> list[dict]:
-    """Query audit events with optional filters."""
+    """Return audit events matching the given filters, newest first.
+
+    All filters are optional and are combined with AND.  Only column *names*
+    are interpolated into the SQL — never user-supplied values — so this is
+    safe from SQL injection despite the f-string.  All filter values go
+    through named parameters (`:policy`, `:decision`, etc.).
+    """
     clauses = []
     params: dict = {}
 
@@ -180,7 +209,7 @@ def query(
 
 
 def summary() -> dict:
-    """Aggregate stats across all audit events."""
+    """Return aggregate counts broken down by decision, policy, and environment."""
     with _conn() as db:
         total = db.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
         by_decision = dict(
