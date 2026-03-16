@@ -1,0 +1,51 @@
+name: PR Policy Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  collect:
+    name: Collect PR metadata
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      approvers: ${{ steps.approvers.outputs.list }}
+      head_ref: ${{ steps.refs.outputs.head }}
+      base_ref: ${{ steps.refs.outputs.base }}
+    steps:
+      - name: Resolve refs
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request_review" ]; then
+            echo "head=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "base=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "head=${{ github.head_ref }}" >> "$GITHUB_OUTPUT"
+            echo "base=${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get approvers
+        id: approvers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          APPROVERS=$(gh api "repos/${{ github.repository }}/pulls/${PR}/reviews" \
+            --jq '[.[] | select(.state == "APPROVED") | .user.login] | unique | join(",")')
+          echo "list=${APPROVERS}" >> "$GITHUB_OUTPUT"
+          echo "Approvers: ${APPROVERS:-none}"
+
+  policy:
+    name: gitpoli PR Policy
+    needs: collect
+    uses: ./.github/workflows/reusable-pr-check.yml
+    with:
+      head-ref: ${{ needs.collect.outputs.head_ref }}
+      base-ref: ${{ needs.collect.outputs.base_ref }}
+      approvers: ${{ needs.collect.outputs.approvers }}
+      fail-on-deny: true
