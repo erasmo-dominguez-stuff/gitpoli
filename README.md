@@ -4,7 +4,7 @@
 
 gitpoli lets platform and security teams define, test, and enforce deployment and pull-request rules across their GitHub repositories — all as versioned [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/) policies evaluated by [Open Policy Agent](https://www.openpolicyagent.org/).
 
-> **gitpoli** = _policy + policia_. The `.repol/` configuration directory stands for **repo policies** — the per-repo rules that teams own and edit.
+> The `.repol/` configuration directory stands for **repo policies** — the per-repo rules that teams own and edit.
 
 [![OPA](https://img.shields.io/badge/OPA-v1.x-blue?logo=openpolicyagent)](https://www.openpolicyagent.org/)
 [![Rego v1](https://img.shields.io/badge/Rego-v1-4a90e2)](https://www.openpolicyagent.org/docs/latest/policy-language/)
