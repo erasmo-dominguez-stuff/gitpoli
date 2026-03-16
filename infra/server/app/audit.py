@@ -111,6 +111,26 @@ def record(
     return row
 
 
+def update_callback(event_id: str, *, status_code: int, state: str) -> None:
+    """Record the GitHub callback result on an existing audit event."""
+    with _conn() as db:
+        row = db.execute(
+            "SELECT meta FROM audit_events WHERE id = :id", {"id": event_id}
+        ).fetchone()
+        if not row:
+            return
+        meta = json.loads(row["meta"])
+        meta["callback"] = {
+            "status_code": status_code,
+            "state": state,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        db.execute(
+            "UPDATE audit_events SET meta = :meta WHERE id = :id",
+            {"meta": json.dumps(meta), "id": event_id},
+        )
+
+
 def get_by_id(event_id: str) -> Optional[dict]:
     """Retrieve a single audit event by ID."""
     with _conn() as db:
@@ -157,3 +177,31 @@ def query(
         ).fetchall()
 
     return [_deserialize_row(r) for r in rows]
+
+
+def summary() -> dict:
+    """Aggregate stats across all audit events."""
+    with _conn() as db:
+        total = db.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
+        by_decision = dict(
+            db.execute(
+                "SELECT decision, COUNT(*) FROM audit_events GROUP BY decision"
+            ).fetchall()
+        )
+        by_policy = dict(
+            db.execute(
+                "SELECT policy, COUNT(*) FROM audit_events GROUP BY policy"
+            ).fetchall()
+        )
+        by_environment = dict(
+            db.execute(
+                "SELECT environment, COUNT(*) FROM audit_events "
+                "WHERE environment != '' GROUP BY environment"
+            ).fetchall()
+        )
+    return {
+        "total": total,
+        "by_decision": by_decision,
+        "by_policy": by_policy,
+        "by_environment": by_environment,
+    }

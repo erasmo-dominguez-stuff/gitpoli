@@ -27,6 +27,12 @@ async def get_audit(
     )
 
 
+@router.get("/summary")
+async def get_audit_summary():
+    """Aggregate stats: totals by decision, policy, and environment."""
+    return audit.summary()
+
+
 @router.get("/{event_id}")
 async def get_audit_event(event_id: str):
     """Retrieve a single audit event by ID."""

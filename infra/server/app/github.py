@@ -13,6 +13,7 @@ import httpx
 import jwt
 
 from .config import GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_PATH
+from . import audit
 
 logger = logging.getLogger("policy-server")
 
@@ -146,5 +147,7 @@ async def github_callback(
             environment_name,
             "app" if installation_id else "none",
         )
+        audit.update_callback(audit_id, status_code=resp.status_code, state=state)
     except Exception as exc:
         logger.error("GitHub callback failed: %s", exc)
+        audit.update_callback(audit_id, status_code=0, state=f"error: {exc}")

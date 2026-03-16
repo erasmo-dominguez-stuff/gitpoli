@@ -9,7 +9,7 @@ from .routers import audit_api, evaluate, health, webhook
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-app = FastAPI(title="Policy Server", version="0.1.0")
+app = FastAPI(title="gitpoli Policy Server", version="1.0.0")
 
 
 @app.on_event("startup")
