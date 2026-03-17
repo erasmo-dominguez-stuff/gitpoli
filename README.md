@@ -51,61 +51,62 @@ Each policy follows the same pattern:
 
 ### Component Diagrams
 
-#### Local Stack (Docker Compose)
+
+#### Local Stack (Docker Compose, direct webhook)
 
 ```mermaid
-graph TD
-  subgraph Local
-    GH[GitHub]
-    Smee[smee.io (optional)]
-    Server[FastAPI Policy Server]
-    OPA[OPA (Rego)]
-    DB[(SQLite)]
+flowchart TD
+  GH["GitHub"]
+  Server["FastAPI Policy Server"]
+  OPA["OPA (Rego)"]
+  subgraph DB
+    SQLite["SQLite DB"]
   end
-  GH-->|Webhook|Smee
-  Smee-->|POST /webhook|Server
-  Server-->|REST|OPA
-  Server-->|Audit|DB
-  OPA-->|Decision|Server
-  Server-->|GitHub API|GH
+  GH -- "Webhook (direct)" --> Server
+  Server -- "REST" --> OPA
+  Server -- "Audit" --> SQLite
+  OPA -- "Decision" --> Server
+  Server -- "GitHub API" --> GH
 ```
 
-#### Integration Stack (with Cosmos & smee)
+
+#### Integration Stack (with smee, Cosmos DB)
 
 ```mermaid
-graph TD
-  subgraph Integration
-    GH[GitHub]
-    Smee[smee.io]
-    Server[FastAPI Policy Server]
-    OPA[OPA (Rego)]
-    Cosmos[(Cosmos DB)]
+flowchart TD
+  GH["GitHub"]
+  Smee["smee.io"]
+  Server["FastAPI Policy Server"]
+  OPA["OPA (Rego)"]
+  subgraph DB
+    Cosmos["Cosmos DB"]
   end
-  GH-->|Webhook|Smee
-  Smee-->|POST /webhook|Server
-  Server-->|REST|OPA
-  Server-->|Audit|Cosmos
-  OPA-->|Decision|Server
-  Server-->|GitHub API|GH
+  GH -- "Webhook" --> Smee
+  Smee -- "POST /webhook" --> Server
+  Server -- "REST" --> OPA
+  Server -- "Audit" --> Cosmos
+  OPA -- "Decision" --> Server
+  Server -- "GitHub API" --> GH
 ```
 
-#### Azure-like Stack (Production Mapping)
+
+#### Azure-like Stack (Production, GitHub App, Cosmos DB)
 
 ```mermaid
-graph TD
-  subgraph Azure
-    GH[GitHub]
-    App[GitHub App]
-    Func[Azure Functions (FastAPI)]
-    OPA[OPA (Rego)]
-    Cosmos[(Cosmos DB)]
+flowchart TD
+  GH["GitHub"]
+  App["GitHub App"]
+  Func["Azure Functions (FastAPI)"]
+  OPA["OPA (Rego)"]
+  subgraph DB
+    Cosmos["Cosmos DB"]
   end
-  GH-->|Webhook|App
-  App-->|POST /webhook|Func
-  Func-->|REST|OPA
-  Func-->|Audit|Cosmos
-  OPA-->|Decision|Func
-  Func-->|GitHub API|GH
+  GH -- "Webhook" --> App
+  App -- "POST /webhook" --> Func
+  Func -- "REST" --> OPA
+  Func -- "Audit" --> Cosmos
+  OPA -- "Decision" --> Func
+  Func -- "GitHub API" --> GH
 ```
 
 ### Webhook flow (deployment protection)
