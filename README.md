@@ -169,7 +169,8 @@ Both policies share common helper functions in `policies/lib/helpers.rego`.
 
 ---
 
-## Repository Layout
+
+## Repository Layout & Extensibility
 
 ```
 .devcontainer/               # Dev Container (recommended dev environment)
@@ -189,6 +190,13 @@ infra/
   local/                     # Local testing (Docker Compose: OPA + server)
   integration/               # Integration testing with real GitHub webhooks
   server/                    # Shared FastAPI server
+    app/
+      handlers/              # Modular policy handlers (extensible registry)
+        __init__.py          # Handler registry (explicit)
+        pull_request.py      # PR policy handler
+        deploy.py            # Deploy policy handler
+      routers/               # API routers (webhook, audit, health)
+      ...                    # Core modules (github, opa, audit, helpers)
   smee/                      # smee.io relay container (webhook tunnel)
 policies/
   lib/helpers.rego           # Shared helper functions
@@ -199,6 +207,29 @@ schemas/                     # JSON Schemas that validate .repol/ files
 scripts/                     # Utility scripts (schema validation)
 Makefile                     # All dev, test, and infra commands
 ```
+
+### Extensible Handler Registry
+
+Policy evaluation logic is now fully modular and extensible:
+
+- Each event type (e.g. `pull_request`, `deployment_protection_rule`) has a dedicated handler module in `infra/server/app/handlers/`.
+- The handler registry in `handlers/__init__.py` allows explicit registration and dispatch.
+- To add a new policy, create a handler module and register it in the registry.
+- The main webhook dispatcher (`routers/webhook.py`) routes events to the registry, making it easy to evolve and extend.
+
+**Example: Adding a new policy handler**
+
+1. Create `handlers/my_policy.py` with your handler function:
+   ```python
+   from ..handlers import register_handler
+   async def handle_my_policy(request, event):
+       # normalization, evaluation, response
+       ...
+   register_handler("my_policy_event", handle_my_policy)
+   ```
+2. The dispatcher will automatically route matching events to your handler.
+
+---
 
 ---
 
@@ -444,37 +475,50 @@ Every policy evaluation is recorded in an SQLite database for traceability.
 
 ### Audit schema
 
-Each event includes:
 
-| Field | Description |
-|-------|-------------|
-| `id` | Unique UUID |
-| `timestamp` | ISO 8601 UTC |
-| `policy` | `deploy` or `pullrequest` |
-| `decision` | `allow` or `deny` |
-| `violations` | Array of `{code, msg}` objects |
-| `input_hash` | SHA-256 hash prefix of the input (for deduplication) |
-| `actor` | Who triggered the evaluation (from `X-Actor` header) |
-| `source` | `webhook`, `evaluate`, or `api` |
-| `environment` | Target environment (deploy only) |
-| `ref` | Git ref being evaluated |
-| `meta` | Extra context: approvers, head_ref, callback result |
+---
 
-### Callback tracking
+## Deployment Proposal for Production
 
-When the server calls the GitHub API to approve/reject, the result is recorded inside the audit event's `meta.callback`:
+This section describes how to deploy gitpoli in a production Azure environment, mapping each component to recommended Azure services:
 
-```json
-{
-  "meta": {
-    "callback": {
-      "status_code": 204,
-      "state": "approved",
-      "timestamp": "2026-03-16T08:00:00+00:00"
-    }
-  }
-}
-```
+### Component Mapping
+
+| Component         | Azure Service / Strategy                | Notes                                  |
+|-------------------|----------------------------------------|----------------------------------------|
+| Policy Server     | Azure Container Apps / App Service     | FastAPI app, scalable, managed         |
+| OPA Engine        | Azure Container Apps (sidecar) / AKS   | OPA as a container, sidecar or AKS pod |
+| Audit Trail       | Azure Cosmos DB (production)           | Replace SQLite with Cosmos DB          |
+| Webhook Relay     | Azure Event Grid / API Management      | smee.io for dev, Event Grid for prod   |
+| Policy Configs    | Azure Blob Storage / Repo mount         | Store YAML configs in Blob Storage     |
+
+### Deployment Steps
+
+1. **Policy Server (FastAPI):**
+  - Deploy as an Azure Container App for managed scaling and easy integration with OPA.
+  - Alternatively, use Azure App Service for simple web hosting.
+
+2. **OPA Engine:**
+  - Run OPA as a sidecar container in Azure Container Apps, or as a pod in Azure Kubernetes Service (AKS).
+  - Mount policies from Blob Storage or use GitHub Actions to publish bundles.
+
+3. **Audit Trail:**
+  - Use Azure Cosmos DB for production-grade audit storage (global distribution, scalability).
+  - Update the audit adapter to use Cosmos DB instead of SQLite.
+
+4. **Webhook Relay:**
+  - For production, use Azure Event Grid or Azure API Management to securely relay GitHub webhooks to the policy server.
+  - For development/integration, smee.io remains supported.
+
+5. **Policy Configs:**
+  - Store `.repol/*.yaml` configs in Azure Blob Storage for centralized, versioned access.
+  - Mount Blob Storage as a volume or fetch configs at runtime.
+
+### Integration
+
+- All components communicate via HTTP APIs.
+- Use Azure Managed Identity for secure access between services (e.g., policy server → Cosmos DB).
+- Configure environment variables for service endpoints and credentials.
 
 ---
 
@@ -536,3 +580,32 @@ make lint test    # run all checks
 ---
 
 MIT © 2026 Erasmo Domínguez
+
+## Simulating Azure Stack Locally
+
+To test the Azure production architecture locally, use Docker Compose in `infra/integration/`:
+
+1. **Run the full stack:**
+   - OPA (policy engine)
+   - Policy Server (FastAPI app)
+   - smee (webhook relay, simulates Azure Event Grid)
+
+2. **How to start:**
+
+```bash
+cd infra/integration
+cp .env.example .env   # Edit with your GitHub App credentials
+docker compose up -d   # Starts opa, server, smee
+```
+
+- smee forwards GitHub webhooks to your local server, simulating Azure Event Grid.
+- Policy Server and OPA run as containers, simulating Azure Container Apps/App Service and OPA sidecar.
+- Audit data is stored in a local volume, simulating Cosmos DB.
+- Policy configs are mounted from `.repol/`, simulating Blob Storage.
+
+3. **Test end-to-end:**
+- Trigger GitHub Actions or deployments in your repo.
+- Webhooks are relayed via smee to your local stack.
+- Policy evaluation, audit, and callbacks are handled as in Azure.
+
+---

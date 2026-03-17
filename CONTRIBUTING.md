@@ -50,58 +50,65 @@ make lint test
 ```
 
 ## Project layout
+# Contributing
 
-```
-.devcontainer/           # Dev Container configuration
-.github/
-  actions/eval-policy/   # Composite action for CI
-  workflows/             # CI/CD workflows
-.repol/                  # Policy YAML configs (teams edit these)
-  pullrequest.yaml       # PR validation rules + branch naming
-  deploy.yaml            # Deployment protection rules per environment
-infra/
-  local/                 # Local testing (Docker Compose: OPA + server)
-  integration/           # Integration testing with real GitHub webhooks
-  server/                # Shared FastAPI server (used by local + integration)
-    app/                 # Modular app package (routers, OPA client, audit, GitHub auth)
-  smee/                  # smee.io relay container (webhook tunnel)
-policies/
-  lib/helpers.rego       # Shared helper functions
-  pullrequest.rego       # PR policy (Rego)
-  deploy.rego            # Deploy policy (Rego)
-  tests/                 # OPA unit tests
-schemas/                 # JSON Schemas that validate .repol/ files
-scripts/                 # Utility scripts (schema validation)
-```
+## Development Guide
 
-## Development workflow
+- Use devcontainer for consistent environment
+- Run `make lint test` before pushing
+- Policies live in `.repol/` and `policies/`
+- API and webhook logic in `infra/server/app/routers/`
+- Policy evaluation logic in `infra/server/app/handlers/` (each handler in its own module)
+- Audit trail in adapters/classes (`infra/server/app/adapters/sqlite_audit_trail.py`)
+- OPA client in adapters/classes (`infra/server/app/adapters/opa_http_client.py`)
+- Interfaces in `infra/server/app/core/` (PolicyEvaluator, AuditTrail, HandlerRegistry)
 
-### 1. Write / edit policies
+## Adding a New Policy (SOLID/Hexagonal Architecture)
 
-Policies live in `policies/` as Rego v1 files. Shared helpers go in `policies/lib/helpers.rego`.
+1. Create a handler module in `infra/server/app/handlers/` (e.g. `my_policy.py`).
+2. Implement a handler class or function:
+   ```python
+   from ..handlers import register_handler
+   class MyPolicyHandler:
+     async def __call__(self, request, event):
+       # Normalize input, use PolicyEvaluator and AuditTrail
+       policy_evaluator = request.app.state.policy_evaluator
+       audit_trail = request.app.state.audit_trail
+       result = await policy_evaluator.evaluate("my/policy", input_data)
+       audit_id = audit_trail.record("my_policy", result, input_data, {"source": "webhook"})
+       return {"allow": result.get("allow", False), "violations": result.get("violations", []), "audit_id": audit_id}
+   handler = MyPolicyHandler()
+   register_handler("my_policy_event", handler)
+   ```
+3. Register the handler explicitly in the registry.
+4. Add your policy logic in `policies/` (Rego) and `.repol/` config if applicable.
+5. Add tests in `tests/` for handler, registry, and adapters.
 
-### 2. Write tests
+## Best Practices
 
-Tests live in `policies/tests/`. Run them with:
+- Use interfaces (core/) and adapters (adapters/) to decouple logic.
+- Do not mix generic helpers in handlers; use dedicated classes or modules.
+- Document your handler and register the event explicitly.
+- Add unit tests for every critical component.
+- If you need helpers, create modules/classes in `core/` or `adapters/` according to responsibility.
 
-```bash
-make test           # verbose
-make test-coverage  # with coverage report
-```
+## Example: Adding a Policy for ADO
 
-### 3. Edit policy configs
+1. Create `handlers/ado_policy.py`.
+2. Implement the handler class:
+   ```python
+   from ..handlers import register_handler
+   class ADOHandler:
+     async def __call__(self, request, event):
+       # Normalization, evaluation, audit
+       ...
+   handler = ADOHandler()
+   register_handler("ado_event", handler)
+   ```
+3. Add adapter for ADO integration in `adapters/` if needed.
+4. Add tests in `tests/`.
 
-Team-facing YAML configurations live in `.repol/`. After editing, validate them against the JSON Schemas:
-
-```bash
-make validate-schemas
-```
-
-### 4. Run all checks
-
-```bash
-make lint    # opa check + opa fmt --fail + schema validation
-```
+---
 
 ### 5. Pre-commit hooks
 

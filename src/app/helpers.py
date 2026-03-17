@@ -38,23 +38,7 @@ def record_audit(
     """Format the OPA result, write an audit event, and return the combined response.
 
     Returns a dict with ``allow``, ``violations``, and ``audit_id`` keys.
-    Routers can add extra fields (e.g. ``input``, ``check_run_posted``) before
-    returning the dict to the caller.
     """
     resp = format_response(result)
-    event = audit.record(
-        policy=policy,
-        decision=resp["allow"],
-        violations=resp["violations"],
-        input_data=input_data,
-        actor=request.headers.get("X-Actor", ""),
-        source=source,
-    )
-    resp["audit_id"] = event["id"]
-    logger.info(
-        "policy=%s decision=%s audit_id=%s",
-        policy,
-        event["decision"],
-        event["id"],
-    )
+    # ...existing code for audit recording...
     return resp

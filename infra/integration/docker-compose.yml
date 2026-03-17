@@ -9,7 +9,7 @@ services:
 
   server:
     build:
-      context: ../server
+      context: ../../src/
     ports:
       - "8080:8080"
     environment:
@@ -28,7 +28,7 @@ services:
 
   smee:
     build:
-      context: ../smee
+      context: ./smee
     environment:
       SMEE_URL: ${SMEE_URL:-}
       SMEE_TARGET: http://server:8080/webhook
