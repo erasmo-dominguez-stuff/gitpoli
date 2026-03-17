@@ -27,4 +27,4 @@ jobs:
       - name: Run tests
         run: |
           pip install pytest
-          pytest src/app
+          pytest tests --junitxml=reports/test-results.xml
